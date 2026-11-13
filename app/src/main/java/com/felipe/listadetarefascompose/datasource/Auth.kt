@@ -1,0 +1,90 @@
+package com.felipe.listadetarefascompose.datasource
+
+import com.google.firebase.FirebaseNetworkException
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
+import com.google.firebase.auth.FirebaseAuthUserCollisionException
+import com.google.firebase.auth.FirebaseAuthWeakPasswordException
+import com.google.firebase.firestore.FirebaseFirestore
+import com.felipe.listadetarefascompose.listener.ListenerAuth
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import javax.inject.Inject
+
+class Auth @Inject constructor() {
+
+    val auth = FirebaseAuth.getInstance()
+    val db = FirebaseFirestore.getInstance()
+
+    val _verificarUsuarioLogado = MutableStateFlow(false)
+    val verificarUsuarioLogado: StateFlow<Boolean> = _verificarUsuarioLogado
+
+    fun cadastro(nome: String,email: String, senha: String, listenerAuth: ListenerAuth){
+
+        if (nome.isEmpty() ||email.isEmpty() || senha.isEmpty()){
+            listenerAuth.onFailure("Preencha todos os campos!")
+        }else{
+            auth.createUserWithEmailAndPassword(email,senha).addOnCompleteListener { cadastro ->
+                if (cadastro.isSuccessful){
+
+                    var usuarioID = FirebaseAuth.getInstance().currentUser?.uid.toString()
+
+                    val dadosUsuarioMap = hashMapOf(
+                        "nome" to nome,
+                        "email" to email,
+                        "usuarioID" to usuarioID
+                    )
+
+                    db.collection("usuarios").document(usuarioID).set(dadosUsuarioMap).addOnCompleteListener {
+                       listenerAuth.onSucess("Sucesso ao cadastrar usuário","login")
+                    }.addOnFailureListener {
+                        listenerAuth.onFailure("Erro inesperado!")
+                    }
+                }
+
+            }.addOnFailureListener { exception ->
+
+                val erro = when(exception){
+                    is FirebaseAuthUserCollisionException -> "Está conta já foi cadastrada!"
+                    is FirebaseAuthWeakPasswordException -> "Digite uma senha com no mínimo 6 caracteres!"
+                    is FirebaseNetworkException -> "Sem conexão com a internet!"
+                    else -> "E-mail inválido!"
+                }
+
+                listenerAuth.onFailure(erro)
+            }
+        }
+    }
+
+    fun login(email: String, senha: String, listenerAuth: ListenerAuth){
+
+        if (email.isEmpty() || senha.isEmpty()){
+           listenerAuth.onFailure("Preencha todos os campos!")
+        }else{
+            auth.signInWithEmailAndPassword(email,senha).addOnCompleteListener { autenticacao ->
+                if (autenticacao.isSuccessful){
+                    listenerAuth.onSucess("Sucesso ao fazer o login!","listaTarefas")
+                }
+            }.addOnFailureListener { exception ->
+
+                val erro = when(exception){
+                    is FirebaseAuthInvalidCredentialsException -> "A senha está errada!"
+                    is FirebaseNetworkException -> "Sem conexão com a internet!"
+                    else -> "E-mail inválido!"
+                }
+
+                listenerAuth.onFailure(erro)
+            }
+        }
+    }
+
+    fun verificarUsuarioLogado(): Flow<Boolean>{
+
+       val usuarioLogado = FirebaseAuth.getInstance().currentUser
+
+        _verificarUsuarioLogado.value = usuarioLogado != null
+        return verificarUsuarioLogado
+    }
+
+}
